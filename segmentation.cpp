@@ -17,9 +17,8 @@ using namespace cv;
 using namespace dnn;
 using namespace std;
 
-// Initialize the parameters
-float confThreshold = 0.5; // Confidence threshold
-float maskThreshold = 0.3; // Mask threshold
+float confThreshold = 0.51; // Confidence threshold
+float maskThreshold = 0.45; // Mask threshold
 
 vector<string> classes;
 vector<Scalar> colors;
@@ -28,12 +27,14 @@ vector<Scalar> colors;
 void drawBox(Mat& frame, int classId, float conf, Rect box, Mat& objectMask);
 
 // Postprocess the neural network's output for each frame
-void postprocess(Mat& frame, const vector<Mat>& outs);
+void postprocess(Mat& frame, const vector<Mat>& outs, string fileName);
+
+void saveIsolatedDetections(Mat& frame, int id, int detectionNumber, Mat& objectMask, Rect boundingBox, string fileName);
 
 int main(int argc, char** argv)
 {
     CommandLineParser parser(argc, argv, keys);
-    parser.about("Use this script to run object detection using YOLO3 in OpenCV.");
+    
     if (parser.has("help"))
     {
         parser.printMessage();
@@ -43,9 +44,10 @@ int main(int argc, char** argv)
     string classesFile = "mscoco_labels.names";
     ifstream ifs(classesFile.c_str());
     string line;
-    while (getline(ifs, line)) classes.push_back(line);
-
-    string device = parser.get<String>("device");
+    while (getline(ifs, line)){
+        classes.push_back(line);
+        //cout<<line<<endl;
+    }
     
     // Load the colors
     string colorsFile = "colors.txt";
@@ -66,18 +68,8 @@ int main(int argc, char** argv)
 
     // Load the network
     Net net = readNetFromTensorflow(modelWeights, textGraph);
-
-    if (device == "cpu")
-    {
-        cout << "Using CPU device" << endl;
-        net.setPreferableBackend(DNN_TARGET_CPU);
-    }
-    else if (device == "gpu")
-    {
-        cout << "Using GPU device" << endl;
-        // net.setPreferableBackend(DNN_BACKEND_CUDA);
-        // net.setPreferableTarget(DNN_TARGET_CUDA);
-    }
+    net.setPreferableBackend(DNN_TARGET_CPU);
+    
     
     // Open a video file or an image file or a camera stream.
     string str, outputFile;
@@ -87,7 +79,7 @@ int main(int argc, char** argv)
     
     try {
         
-        outputFile = "mask_rcnn_out_cpp.avi";
+        
         if (parser.has("image"))
         {
             // Open the image file
@@ -125,8 +117,8 @@ int main(int argc, char** argv)
     }
 
     // Create a window
-    static const string kWinName = "Deep learning object detection in OpenCV";
-    namedWindow(kWinName, WINDOW_NORMAL);
+    static const string WinName = "Instance segmentation demo - Milestone Systems";
+    namedWindow(WinName, WINDOW_NORMAL);
 
     // Process frames.
     while (waitKey(1) < 0)
@@ -142,7 +134,7 @@ int main(int argc, char** argv)
             break;
         }
         // Create a 4D blob from a frame.
-         blobFromImage(frame, blob, 1.0, Size(frame.cols, frame.rows), Scalar(), true, false);
+        blobFromImage(frame, blob, 1.0, Size(frame.cols, frame.rows), Scalar(), true, false);
         //blobFromImage(frame, blob);
         
         //Sets the input to the network
@@ -156,14 +148,7 @@ int main(int argc, char** argv)
         net.forward(outs, outNames);
         
         // Extract the bounding box and mask for each of the detected objects
-        postprocess(frame, outs);
-        
-        // Put efficiency information. The function getPerfProfile returns the overall time for inference(t) and the timings for each of the layers(in layersTimes)
-        vector<double> layersTimes;
-        double freq = getTickFrequency() / 1000;
-        double t = net.getPerfProfile(layersTimes) / freq;
-        string label = format("Mask-RCNN on 2.5 GHz Intel Core i7 CPU, Inference time for a frame : %0.0f ms", t);
-        putText(frame, label, Point(0, 15), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 0, 0));
+        postprocess(frame, outs, outputFile);
         
         // Write the frame with the detection boxes
         Mat detectedFrame;
@@ -171,7 +156,7 @@ int main(int argc, char** argv)
         if (parser.has("image")) imwrite(outputFile, detectedFrame);
         else video.write(detectedFrame);
         
-        imshow(kWinName, frame);
+        imshow(WinName, frame);
 
     }
     
@@ -182,7 +167,7 @@ int main(int argc, char** argv)
 }
 
 // For each frame, extract the bounding box and mask for each detected object
-void postprocess(Mat& frame, const vector<Mat>& outs)
+void postprocess(Mat& frame, const vector<Mat>& outs, string fileName)
 {
     Mat outDetections = outs[0];
     Mat outMasks = outs[1];
@@ -193,7 +178,7 @@ void postprocess(Mat& frame, const vector<Mat>& outs)
     // HxW - segmentation shape
     const int numDetections = outDetections.size[2];
     const int numClasses = outMasks.size[1];
-    
+    Mat segmentationFrame = frame.clone();
     outDetections = outDetections.reshape(1, outDetections.total() / 7);
     for (int i = 0; i < numDetections; ++i)
     {
@@ -206,7 +191,7 @@ void postprocess(Mat& frame, const vector<Mat>& outs)
             int top = static_cast<int>(frame.rows * outDetections.at<float>(i, 4));
             int right = static_cast<int>(frame.cols * outDetections.at<float>(i, 5));
             int bottom = static_cast<int>(frame.rows * outDetections.at<float>(i, 6));
-            
+            cout << classes[classId] << endl;
             left = max(0, min(left, frame.cols - 1));
             top = max(0, min(top, frame.rows - 1));
             right = max(0, min(right, frame.cols - 1));
@@ -215,13 +200,46 @@ void postprocess(Mat& frame, const vector<Mat>& outs)
             
             // Extract the mask for the object
             Mat objectMask(outMasks.size[2], outMasks.size[3],CV_32F, outMasks.ptr<float>(i,classId));
-            
+            //Save images of bounding boxes and segmented objects
+            saveIsolatedDetections(segmentationFrame, classId, i, objectMask, box, fileName);
             // Draw bounding box, colorize and show the mask on the image
             drawBox(frame, classId, score, box, objectMask);
             
         }
     }
 }
+
+void saveIsolatedDetections(Mat& frame, int id, int detectionNumber, Mat& objectMask, Rect boundingBox, string fileName)
+{
+    //create strings for new files
+    string className = classes[id];
+    string strSufixDetected = "_" + className + "_" + to_string(detectionNumber) + ".jpg";
+    string strSufixSegmented = "_seg.jpg";
+    string outputFileDetected = fileName.replace(fileName.end()-4,fileName.end(),strSufixDetected);
+    string outputFileSegmented = fileName.replace(fileName.end()-4,fileName.end(),strSufixSegmented);
+
+    //crop input frame to bounding box size
+    Mat detectedImage = frame(boundingBox);
+    //save file
+    imwrite(outputFileDetected, detectedImage);
+    //Debug image sizes:
+
+    //cout << "Frame size: " << detectedImage.size[0] << "x"<< detectedImage.size[1] << endl;
+    //cout << "Mas size: " << objectMask.size[0] << "x"<< objectMask.size[1] << endl;
+
+    //Resize BB to match size of object
+    resize(objectMask, objectMask, Size(boundingBox.width, boundingBox.height));
+    Mat mask = (objectMask > maskThreshold); // adjust maskThreshold to expand or shrink mask, the higher the tighter
+    //Debug image sizes
+
+    //cout << "resized mask size: " << mask.size[0] << "x"<< mask.size[1] << endl;
+    
+    //Segment image and save file
+    Mat segmentedFrame ;
+    copyTo(detectedImage,segmentedFrame,mask);
+    imwrite(outputFileSegmented, segmentedFrame);
+}
+
 
 // Draw the predicted bounding box, colorize and show the mask on the image
 void drawBox(Mat& frame, int classId, float conf, Rect box, Mat& objectMask)
@@ -246,7 +264,7 @@ void drawBox(Mat& frame, int classId, float conf, Rect box, Mat& objectMask)
 
     Scalar color = colors[classId%colors.size()];
     
-    // Resize the mask, threshold, color and apply it on the image
+    //Resize the mask, threshold, color and apply it on the image
     resize(objectMask, objectMask, Size(box.width, box.height));
     Mat mask = (objectMask > maskThreshold);
     Mat coloredRoi = (0.3 * color + 0.7 * frame(box));
