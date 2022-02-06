@@ -1,5 +1,7 @@
 # instance_segmentation
 C++ implementation of an instance segmentation deep learning model to mask the object's pixels from the input images. The model used was Mask RCNN (Inception v2 2018 trained on COCO classes). The model, already trained and exported is loaded into the pipeline using the OpenCV DNN module (that accepts models in different formats) and then the output is postprocessed to draw bounding boxes around each class instance and color a mas on top of the segmentation output. Additionally, a close-up and a segmented image is saves for each instance.
+![test](https://user-images.githubusercontent.com/44910949/152676382-65474cc1-2bfd-4f18-afcb-e9dc87355d8d.jpg)
+![test_mask_rcnn_out](https://user-images.githubusercontent.com/44910949/152676386-a075392b-341c-4d72-9f4e-2b4848b147ea.jpg)
 
 ## Dependencies
 
